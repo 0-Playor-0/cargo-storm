@@ -13,7 +13,7 @@ from typing import Protocol
 import numpy as np
 
 from cargostorm import bitboard as bb
-from cargostorm.engine import SHIFT_CHANCE, GameState, canon_col_to_lane, legal_lanes, to_canonical
+from cargostorm.engine import SHIFT_CHANCE, GameState, canon_col_to_lane, to_canonical
 
 
 class Agent(Protocol):
@@ -36,19 +36,6 @@ class CanonicalAgent:
 
     def choose_canonical(self, canon: np.ndarray, player: int) -> int:
         raise NotImplementedError
-
-
-class RandomAgent(CanonicalAgent):
-    name = "Random"
-
-    def __init__(self, seed: int | None = None):
-        self.rng = np.random.default_rng(seed)
-
-    def choose(self, state: GameState) -> int:
-        return int(self.rng.choice(legal_lanes(state)))
-
-    def choose_canonical(self, canon, player) -> int:
-        return int(self.rng.choice(np.flatnonzero(canon[0] == 0)))
 
 
 class HeuristicAgent(CanonicalAgent):

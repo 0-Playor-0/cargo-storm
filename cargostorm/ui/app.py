@@ -1,4 +1,4 @@
-"""The pygame front end: a menu and the game, dressed as a ship's hold in a storm.
+"""The pygame front end: menu, opponent picker and game, dressed as a ship's hold in a storm.
 
 Rendering only reads the Match's view and reacts to its events. All rules live in the
 engine, all timing in the Match; this file decides how things look and sound.
@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import math
 import random
+from dataclasses import dataclass
 
+import numpy as np
 import pygame
 
-from cargostorm.agents import RandomAgent
-from cargostorm.engine import SIZE, EndReason, Gravity, lane_cells, legal_lanes
+from cargostorm.engine import P1, P2, SIZE, EndReason, Gravity, lane_cells, legal_lanes
 from cargostorm.ui import theme as T
 from cargostorm.ui.fx import FX
 from cargostorm.ui.layout import (
@@ -31,6 +32,7 @@ from cargostorm.ui.layout import (
     outside_entry,
 )
 from cargostorm.ui.match import Match, Mode
+from cargostorm.ui.opponents import TIERS, Opponents, Tier
 from cargostorm.ui.sound import SoundBank
 from cargostorm.ui.tween import ease_in_out_cubic, ease_out_cubic, lerp
 
@@ -39,10 +41,12 @@ LANE_KEYS = {getattr(pygame, f"K_{i + 1}"): i for i in range(SIZE)} | {
 }
 
 MENU_ITEMS = [
-    (Mode.VS_AI, "Play vs AI", "You are Player 1"),
+    (Mode.VS_AI, "Play vs AI", "Five opponents, from Beginner to Expert"),
     (Mode.HOTSEAT, "Two Players", "Take turns at the helm"),
-    (Mode.SPECTATE, "Watch AI vs AI", "Sit back and weather the storm"),
+    (Mode.SPECTATE, "Watch AI vs AI", "Pick two crews and weather the storm"),
 ]
+SIDES = [("first", "First"), ("second", "Second"), ("random", "Random")]
+MAX_ELO = 560  # strength bars are drawn relative to this
 
 FOOTER = "Click a lane or press 1-7    ·    R restart    ·    M sound    ·    Esc menu"
 
@@ -179,15 +183,142 @@ class MenuScene:
 
 
 # --------------------------------------------------------------------------------------
+# Who plays: choosing opponents and sides
+# --------------------------------------------------------------------------------------
+
+
+@dataclass
+class Lineup:
+    """Who plays each crew. Remembered between games, so 'Play again' keeps the setup."""
+
+    mode: Mode
+    opponent: Tier = TIERS[2]  # vs AI
+    side: str = "first"  # vs AI: "first", "second" or "random"
+    red: Tier = TIERS[3]  # AI vs AI: Player 1 (moves first)
+    gold: Tier = TIERS[2]  # AI vs AI: Player 2
+
+    def deal(self, opponents: Opponents, rng: np.random.Generator) -> tuple[dict, dict]:
+        """Agents (None = human) and display names for both players, for one game."""
+        if self.mode is Mode.HOTSEAT:
+            return {P1: None, P2: None}, {P1: "Player 1", P2: "Player 2"}
+        if self.mode is Mode.VS_AI:
+            human = {"first": P1, "second": P2}.get(self.side) or int(rng.choice([P1, P2]))
+            ai = 3 - human
+            return {human: None, ai: opponents.make(self.opponent)}, {human: "You", ai: self.opponent.ai}
+        names = (self.red.ai, self.gold.ai) if self.red is not self.gold else (f"{self.red.ai} (Red)", f"{self.gold.ai} (Gold)")
+        return {P1: opponents.make(self.red), P2: opponents.make(self.gold)}, {P1: names[0], P2: names[1]}
+
+
+class SetupScene:
+    """Pick the opponent and your side (vs AI), or both crews (AI vs AI)."""
+
+    storm_level = 0.0
+
+    def __init__(self, app: "App", mode: Mode):
+        self.app = app
+        self.mode = mode
+        self.lineup = app.lineups[mode]
+        self.time = 0.0
+        self.targets: list[tuple[pygame.Rect, tuple]] = []  # clickable (rect, (kind, value))
+        if mode is Mode.VS_AI:
+            for i in range(len(TIERS)):
+                self.targets.append((pygame.Rect(WIDTH // 2 - 290, 158 + i * 80, 580, 70), ("opponent", i)))
+            for k, (value, _) in enumerate(SIDES):
+                self.targets.append((pygame.Rect(WIDTH // 2 - 250 + k * 170, 612, 160, 52), ("side", value)))
+        else:
+            for i in range(len(TIERS)):
+                self.targets.append((pygame.Rect(WIDTH // 2 - 330, 200 + i * 78, 310, 68), ("red", i)))
+                self.targets.append((pygame.Rect(WIDTH // 2 + 20, 200 + i * 78, 310, 68), ("gold", i)))
+        self.start_rect = pygame.Rect(0, 0, 300, 62)
+        self.start_rect.center = (WIDTH // 2, 718)
+        self.hover = {key: 0.0 for _, key in self.targets} | {"start": 0.0}
+        self.glow = {key: float(self.selected(key)) for _, key in self.targets}
+
+    def selected(self, key) -> bool:
+        kind, value = key
+        if kind == "side":
+            return self.lineup.side == value
+        return getattr(self.lineup, kind) is TIERS[value]
+
+    def choose(self, key) -> None:
+        kind, value = key
+        setattr(self.lineup, kind, value if kind == "side" else TIERS[value])
+        self.app.sound.play("tick", 0.5)
+
+    def handle(self, event) -> None:
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.start_rect.collidepoint(event.pos):
+                self.start()
+            for rect, key in self.targets:
+                if rect.collidepoint(event.pos):
+                    self.choose(key)
+        elif event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                self.app.menu()
+            elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                self.start()
+            elif event.key == pygame.K_m:
+                self.app.sound.toggle_mute()
+            elif self.mode is Mode.VS_AI and pygame.K_1 <= event.key < pygame.K_1 + len(TIERS):
+                self.choose(("opponent", event.key - pygame.K_1))
+            elif self.mode is Mode.VS_AI and event.key in (pygame.K_f, pygame.K_s, pygame.K_r):
+                self.choose(("side", {pygame.K_f: "first", pygame.K_s: "second", pygame.K_r: "random"}[event.key]))
+
+    def start(self) -> None:
+        self.app.sound.play("tick", 0.6)
+        self.app.play(self.lineup)
+
+    def update(self, dt: float) -> None:
+        self.time += dt
+        mouse = pygame.mouse.get_pos()
+        ease = min(1.0, dt * 12)
+        for rect, key in self.targets:
+            self.hover[key] += ((1.0 if rect.collidepoint(mouse) else 0.0) - self.hover[key]) * ease
+            self.glow[key] += (float(self.selected(key)) - self.glow[key]) * ease
+        self.hover["start"] += ((1.0 if self.start_rect.collidepoint(mouse) else 0.0) - self.hover["start"]) * ease
+
+    def draw(self, surf) -> None:
+        app, f = self.app, self.app.fonts
+        app.scenery.draw(surf, sway=math.sin(self.time * 0.7) * 3)
+        title = "Choose your opponent" if self.mode is Mode.VS_AI else "Choose both crews"
+        T.text(surf, f.heading, title, T.TEXT, center=(WIDTH // 2, 92))
+        if self.mode is Mode.SPECTATE:
+            for x, player, caption in ((WIDTH // 2 - 175, P1, "Red crew  ·  moves first"), (WIDTH // 2 + 175, P2, "Gold crew")):
+                icon = app.art.crate_small[player]
+                width = f.body.size(caption)[0]
+                surf.blit(icon, icon.get_rect(center=(x - width // 2 - 26, 166)))
+                T.text(surf, f.body, caption, T.TEXT, center=(x, 166))
+        for rect, key in self.targets:
+            kind, value = key
+            if kind == "side":
+                label = dict(SIDES)[value]
+                T.draw_chip(surf, f, rect, label, self.glow[key], self.hover[key])
+            else:
+                tier = TIERS[value]
+                T.draw_tier_card(surf, f, rect, tier.label, tier.ai, tier.blurb, tier.elo, tier.elo / MAX_ELO,
+                                 self.glow[key], self.hover[key], compact=self.mode is Mode.SPECTATE)
+        if self.mode is Mode.VS_AI:
+            T.text(surf, f.small, "You move", T.MUTED, center=(WIDTH // 2, 594))
+        T.draw_plank_button(surf, f, self.start_rect, "Set Sail", None, self.hover["start"])
+        hint = ("1-5 opponent    ·    F / S / R side    ·    Enter start    ·    Esc back" if self.mode is Mode.VS_AI
+                else "Click to choose each crew    ·    Enter start    ·    Esc back")
+        T.text(surf, f.small, hint, T.MUTED, center=(WIDTH // 2, HEIGHT - 15))
+        app.scenery.draw_flash(surf)
+
+
+# --------------------------------------------------------------------------------------
 # Game
 # --------------------------------------------------------------------------------------
 
 
 class GameScene:
-    def __init__(self, app: "App", mode: Mode, seed: int | None = None):
+    def __init__(self, app: "App", lineup: Lineup, seed: int | None = None):
         self.app = app
-        self.mode = mode
-        self.match = Match.for_mode(mode, RandomAgent, seed)
+        self.mode = lineup.mode
+        self.lineup = lineup
+        self.rng = np.random.default_rng(seed)
+        agents, self.names = lineup.deal(app.opponents, self.rng)
+        self.match = Match(agents, seed)
         self.fx = FX(seed or 0)
         self.layer = pygame.Surface((LAYER_PX, LAYER_PX), pygame.SRCALPHA)
         self.time = 0.0
@@ -225,6 +356,7 @@ class GameScene:
                 m.request_lane(lane)
 
     def restart(self) -> None:
+        self.match.agents, self.names = self.lineup.deal(self.app.opponents, self.rng)  # re-rolls a random side
         self.match.restart()
         self.fx.clear()
         self.lands.clear()
@@ -536,13 +668,17 @@ class GameScene:
             e = ease_out_cubic(clamp01((self.time - self.turn_t) / 0.35))
             alpha = int(255 * e)
             blit_alpha(surf, art.crate_small[who], (30, 22 + 6 * (1 - e)), alpha)
-            T.text(surf, f.body, f"{T.PLAYER_NAME[who]}'s turn", T.TEXT, topleft=(78, 16 + 6 * (1 - e)), alpha=alpha)
+            name = self.names[who]
+            label = "Your turn" if name == "You" else f"{name}'s turn"
+            T.text(surf, f.body, label, T.TEXT, topleft=(78, 16 + 6 * (1 - e)), alpha=alpha)
             if m.view.storm:
                 sub = "Hold on..."
             elif not m.is_human(who):
-                sub = "AI is thinking" + "." * (1 + int(self.time * 3) % 3)
+                sub = "Thinking" + "." * (1 + int(self.time * 3) % 3)
+            elif self.mode is Mode.VS_AI:
+                sub = f"Pick a lane   ·   vs {self.lineup.opponent.ai} ({self.lineup.opponent.label})"
             else:
-                sub = "Your move" if self.mode is Mode.VS_AI else "Pick a lane"
+                sub = "Pick a lane"
             T.text(surf, f.small, sub, T.MUTED, topleft=(80, 50), alpha=alpha)
         angle, head, glow = self._compass_state()
         T.draw_compass(surf, (WIDTH - 62, 46), 31, angle, head, glow)
@@ -555,7 +691,8 @@ class GameScene:
         e = self.over_t or 0.0
         q = clamp01(e / 0.45)
         if s.winner:
-            title, color = f"{T.PLAYER_NAME[s.winner]} Wins!", T.PLAYER_GLOW[s.winner]
+            name = self.names[s.winner]
+            title, color = ("You Win!" if name == "You" else f"{name} Wins!"), T.PLAYER_GLOW[s.winner]
         else:
             title, color = "Draw!", T.TEXT
         img = f.heading.render(title, True, color)
@@ -594,6 +731,8 @@ class App:
         self.art = T.Art()
         self.sound = SoundBank(enabled=sound)
         self.scenery = Scenery(self.art)
+        self.opponents = Opponents()  # starts loading the trained networks in the background
+        self.lineups = {mode: Lineup(mode) for mode in Mode}
         self.scene = MenuScene(self)
         self.fade = 1.0  # fade in from black on launch
         self._pending = None
@@ -606,7 +745,14 @@ class App:
         self._go(lambda: MenuScene(self))
 
     def start(self, mode: Mode) -> None:
-        self._go(lambda: GameScene(self, mode, self.seed))
+        """From the menu: two-player games start at once; the others pick opponents first."""
+        if mode is Mode.HOTSEAT:
+            self.play(self.lineups[mode])
+        else:
+            self._go(lambda: SetupScene(self, mode))
+
+    def play(self, lineup: Lineup) -> None:
+        self._go(lambda: GameScene(self, lineup, self.seed))
 
     def frame(self, dt: float, events) -> None:
         if self._pending:

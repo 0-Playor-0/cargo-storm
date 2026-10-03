@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from cargostorm.agents import ExpectiminimaxAgent, HeuristicAgent
+from cargostorm.agents import CanonicalAgent, ExpectiminimaxAgent, HeuristicAgent
 from cargostorm.envs import Policy, VecVsOpponent, agent_policy, random_policy
 from cargostorm.rl.nets import ActorNet, PolicyNet, QNet, masked
 from cargostorm.vecgame import encode
@@ -81,6 +81,18 @@ def frozen_copy(model: torch.nn.Module) -> torch.nn.Module:
     for p in snapshot.parameters():
         p.requires_grad_(False)
     return snapshot
+
+
+class NetAgent(CanonicalAgent):
+    """A trained network as a one-board agent, for playing against in the game."""
+
+    def __init__(self, path: str | Path):
+        model, ckpt = load_checkpoint(path)
+        self.name = ckpt["algo"].upper()
+        self._act = net_policy(model, "cpu")
+
+    def choose_canonical(self, canon, player) -> int:
+        return int(self._act(canon[None], np.array([player], np.int8), canon[None, 0] == 0)[0])
 
 
 # --- training opponents --------------------------------------------------------------

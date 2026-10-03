@@ -9,22 +9,27 @@ Input is only accepted when the view has caught up with the truth.
 The controller also emits events ("land", "storm", "impact", ...) as the view reaches
 each moment. Sound and visual effects listen to those; the controller never knows they
 exist.
+
+Computer players think on a worker thread, so a slow search never freezes the
+animation. Their thinking starts as soon as it's their turn and overlaps the short
+pause that lets a human follow the game.
 """
 
 from __future__ import annotations
 
 import itertools
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 
 import numpy as np
 
 from cargostorm.agents import Agent
-from cargostorm.engine import P1, P2, Cell, Gravity, Turn, legal_lanes, new_game, step
+from cargostorm.engine import Cell, GameState, Gravity, Turn, legal_lanes, new_game, step
 from cargostorm.ui.layout import outside_entry
 from cargostorm.ui.tween import Step, Timeline, ease_in_quad, fall_duration, lerp
 
-AI_THINK_DELAY = 0.45  # seconds, so a human can follow AI moves
+AI_THINK_DELAY = 0.45  # minimum seconds per AI move, so a human can follow the game
 LOCK_TIME = 0.16  # pause after a crate lands, while it visibly locks in
 STORM_WARNING = 1.25  # lightning + compass spin + the hold starting to roll
 SETTLE_TIME = 0.55  # the hold rocking back to level after a cascade
@@ -60,6 +65,9 @@ class View:
     highlight: dict[int, frozenset[Cell]] = field(default_factory=dict)
 
 
+_THINKER = ThreadPoolExecutor(max_workers=1, thread_name_prefix="cargostorm-ai")
+
+
 def _distance(a, b) -> float:
     return abs(b[0] - a[0]) + abs(b[1] - a[1])
 
@@ -72,15 +80,6 @@ class Match:
         self._ids = itertools.count()
         self.restart()
 
-    @classmethod
-    def for_mode(cls, mode: Mode, make_agent, seed: int | None = None) -> "Match":
-        agents = {
-            Mode.VS_AI: {P1: None, P2: make_agent()},
-            Mode.HOTSEAT: {P1: None, P2: None},
-            Mode.SPECTATE: {P1: make_agent(), P2: make_agent()},
-        }[mode]
-        return cls(agents, seed)
-
     def restart(self) -> None:
         self.state = new_game()
         self.shown = self.state  # the state the HUD describes; lags behind during animation
@@ -88,6 +87,7 @@ class Match:
         self.timeline = Timeline()
         self.events: list[tuple[str, dict]] = [("restart", {})]
         self.thinking = 0.0
+        self._decision: tuple[GameState, Future] | None = None  # an AI move being computed
 
     # --- queries ---------------------------------------------------------------------
 
@@ -127,9 +127,13 @@ class Match:
             self.thinking = 0.0
             return
         self.thinking += dt
-        if self.thinking >= AI_THINK_DELAY:
-            self.thinking = 0.0
-            self._play(self.agents[self.state.to_move].choose(self.state))
+        if self._decision is None or self._decision[0] is not self.state:  # new position: start thinking
+            agent = self.agents[self.state.to_move]
+            self._decision = (self.state, _THINKER.submit(agent.choose, self.state))
+        elif self._decision[1].done() and self.thinking >= AI_THINK_DELAY:
+            lane = self._decision[1].result()
+            self._decision, self.thinking = None, 0.0
+            self._play(lane)
 
     # --- turn -> animation -----------------------------------------------------------
 

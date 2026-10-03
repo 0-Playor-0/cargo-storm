@@ -33,7 +33,6 @@ SEA = (14, 30, 44)
 
 PLAYER_COLOR = {P1: (184, 50, 42), P2: (226, 170, 50)}
 PLAYER_GLOW = {P1: (255, 112, 92), P2: (255, 216, 112)}
-PLAYER_NAME = {P1: "Player 1", P2: "Player 2"}
 GRAVITY_NAME = {Gravity.DOWN: "DOWN", Gravity.UP: "UP", Gravity.LEFT: "LEFT", Gravity.RIGHT: "RIGHT"}
 # Screen angle of each gravity in degrees: 0 = right, 90 = down (y grows downward).
 GRAVITY_ANGLE = {Gravity.RIGHT: 0.0, Gravity.DOWN: 90.0, Gravity.LEFT: 180.0, Gravity.UP: 270.0}
@@ -420,3 +419,41 @@ def draw_plank_button(surf, fonts: Fonts, rect: pygame.Rect, title: str, subtitl
         text(surf, fonts.small, subtitle, mix(MUTED, TEXT, 0.4), center=(r.centerx, r.centery + 17))
     else:
         text(surf, fonts.label, title, TEXT, center=r.center)
+
+
+def _card_base(surf, rect: pygame.Rect, selected: float, hover: float) -> pygame.Rect:
+    """A timber panel that lifts on hover and glows brass when selected."""
+    r = rect.move(0, -3 * hover)
+    pygame.draw.rect(surf, (0, 0, 0), r.move(3, 5), border_radius=8)
+    pygame.draw.rect(surf, mix(mix(TIMBER_DARK, TIMBER, 0.55), TIMBER_LIGHT, 0.25 * hover + 0.15 * selected), r, border_radius=8)
+    pygame.draw.rect(surf, mix(shade(TIMBER_DARK, 0.7), BRASS, selected), r, 2 + int(selected > 0.5), border_radius=8)
+    return r
+
+
+def draw_tier_card(surf, fonts: Fonts, rect: pygame.Rect, label: str, ai: str, blurb: str, elo: int, strength: float,
+                   selected: float, hover: float, compact: bool = False):
+    """An opponent choice: difficulty, which AI plays it, a line about it, and a strength
+    bar (`strength` in [0, 1]) labelled with its tournament Elo."""
+    r = _card_base(surf, rect, selected, hover)
+    color = mix(TEXT, LANTERN, selected)
+    if compact:
+        text(surf, fonts.label, label, color, topleft=(r.x + 16, r.y + 9))
+        text(surf, fonts.small, ai, mix(MUTED, TEXT, 0.5), topleft=(r.x + 18, r.y + 38))
+    else:
+        text(surf, fonts.label, label, color, topleft=(r.x + 18, r.y + 9))
+        text(surf, fonts.small, f"{ai}  ·  {blurb}", mix(MUTED, TEXT, 0.5), topleft=(r.x + 20, r.y + 42))
+    bar = pygame.Rect(0, 0, 80 if compact else 110, 8)
+    bar.midright = (r.right - 16, r.y + 23)
+    pygame.draw.rect(surf, shade(TIMBER_DARK, 0.6), bar, border_radius=4)
+    pygame.draw.rect(surf, mix(BRASS_DARK, BRASS, selected), (bar.x, bar.y, max(8, int(bar.w * strength)), bar.h), border_radius=4)
+    caption = f"Elo {elo}"
+    w, h = fonts.small.size(caption)
+    if compact:  # under the bar, clear of the difficulty name
+        text(surf, fonts.small, caption, MUTED, topleft=(bar.right - w, r.y + 38), shadow=False)
+    else:  # beside the bar
+        text(surf, fonts.small, caption, MUTED, topleft=(bar.x - 10 - w, bar.centery - h // 2), shadow=False)
+
+
+def draw_chip(surf, fonts: Fonts, rect: pygame.Rect, label: str, selected: float, hover: float):
+    r = _card_base(surf, rect, selected, hover)
+    text(surf, fonts.body, label, mix(TEXT, LANTERN, selected), center=r.center)

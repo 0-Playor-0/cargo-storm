@@ -81,17 +81,42 @@ Lanes are always **parallel to gravity**: columns when gravity is up or down, ro
 | **M** | Sound on / off |
 | **Esc** | Back to the menu |
 
+When choosing an opponent: **1–5** picks a level, **F / S / R** picks first, second or random, **Enter** starts.
+
 ### Modes
 
-<img src="docs/images/menu.png" alt="Main menu" width="420" align="right">
+<img src="docs/images/menu.png" alt="Main menu" width="400" align="right">
 
-- **Play vs AI**: you against the computer (currently a random-move opponent).
+- **Play vs AI**: pick one of **five opponents** and whether you move **first, second or at random**.
 - **Two Players**: take turns on one machine.
-- **Watch AI vs AI**: sit back and weather the storm.
+- **Watch AI vs AI**: pick an AI for each crew and watch them battle it out.
 
-Everything you see and hear is generated in code: the wooden hold, crates, brass compass, swinging lanterns and rain-streaked portholes are drawn procedurally, and every sound effect (wood scraping, the latch clicking shut, thunder, the wave hitting the hull, the ship's bell) is synthesised from numpy waveforms at startup. There isn't a single image or audio file in the game.
+Everything you see and hear is generated in code: the wooden hold, crates, brass compass, swinging lanterns and rain-streaked portholes are drawn procedurally, and every sound effect (wood scraping, the latch clicking shut, thunder, the wave hitting the hull, the ship's bell) is synthesised from numpy waveforms at startup. The game contains no image or audio files.
 
 <br clear="right">
+
+### Opponents
+
+Every opponent is a real agent from the [final tournament](#-results-the-tournament), ranked by its rating there. The three trained networks ship with the game, so all five are playable right after installing.
+
+<img src="docs/images/opponents.png" alt="Choosing an opponent" width="400" align="right">
+
+| Level | Opponent | How it plays | Elo |
+|---|---|---|--:|
+| **Beginner** | PPO | Trained policy network. Plays fast, commits early | 345 |
+| **Easy** | Heuristic | Hand-written: wins, blocks, builds threes. Ignores storms | 449 |
+| **Medium** | SAC | Soft Actor-Critic network, 3M moves of training | 481 |
+| **Hard** | DQN | Deep Q-Network, 3M moves of training | 486 |
+| **Expert** | Expectiminimax | Searches 3 moves ahead through every possible storm | 547 |
+
+Choosing your side matters: moving first is a real advantage in this game (see [the findings](#what-we-learned)), so "Second" is the harder challenge at any level.
+
+<br clear="right">
+
+<div align="center">
+<img src="docs/images/vs_ai.png" alt="Playing against SAC with gravity pointing up" width="560"><br>
+<sub>Playing against <b>SAC (Medium)</b> while gravity points <b>up</b>: crates enter from the bottom and fall upward.</sub>
+</div>
 
 ---
 
@@ -107,7 +132,7 @@ pip install -e .
 python -m cargostorm
 ```
 
-(Installed with `pip install -e .`, the game is also available as the `cargostorm` command.)
+Once installed, the game is also available as the `cargostorm` command. The trained networks come with it, so there's nothing to train or download before playing.
 
 ---
 
@@ -313,7 +338,8 @@ cargo-storm/
 │   ├── engine.py            reference rules engine (used by the game)
 │   ├── vecgame.py           numpy engine: hundreds of games at once, for training
 │   ├── bitboard.py          bitboard engine, for game-tree search
-│   ├── agents.py            Random, Heuristic and Expectiminimax players
+│   ├── agents.py            Heuristic and Expectiminimax players
+│   ├── models/              the trained DQN, SAC and PPO networks
 │   ├── envs.py              the training environment (masking, rewards, opponents)
 │   ├── rl/
 │   │   ├── nets.py          shared residual CNN: Q-network, actor-critic, actor
@@ -325,7 +351,8 @@ cargo-storm/
 │   │   └── resume.py        full-state save and resume
 │   └── ui/
 │       ├── app.py           scenes, rendering and input
-│       ├── match.py         turn sequencing and animation timeline
+│       ├── opponents.py     the five difficulty levels
+│       ├── match.py         turn sequencing, animation timeline, AI thinking thread
 │       ├── theme.py         procedural art: hold, crates, compass, lanterns
 │       ├── sound.py         synthesised sound effects
 │       ├── fx.py            particles, shockwaves, screen shake

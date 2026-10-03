@@ -15,3 +15,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["cargostorm*"]
+
+[tool.setuptools.package-data]
+cargostorm = ["models/*.pt"]
