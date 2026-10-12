@@ -25,7 +25,7 @@ A hand-built game, plus three reinforcement-learning agents (DQN, PPO and SAC) t
 - [Quick start](#-quick-start)
 - [How it's built](#-how-its-built)
 - [The AI](#-the-ai)
-- [Results: the tournament](#-results-the-tournament)
+- [Pilot results](#-pilot-results)
 - [Train your own agents](#-train-your-own-agents)
 - [Project structure](#-project-structure)
 - [Acknowledgements](#-acknowledgements)
@@ -97,7 +97,7 @@ Everything you see and hear is generated in code: the wooden hold, crates, brass
 
 ### Opponents
 
-Every opponent is a real agent from the [final tournament](#-results-the-tournament), ranked by its rating there. The three trained networks ship with the game, so all five are playable right after installing.
+Every opponent is a real agent from the [pilot tournament](#-pilot-results), ranked by its rating there. The three trained networks ship with the game, so all five are playable right after installing.
 
 <img src="docs/images/opponents.png" alt="Choosing an opponent" width="400" align="right">
 
@@ -109,7 +109,7 @@ Every opponent is a real agent from the [final tournament](#-results-the-tournam
 | **Hard** | DQN | Deep Q-Network, 3M moves of training | 486 |
 | **Expert** | Expectiminimax | Searches 3 moves ahead through every possible storm | 547 |
 
-Choosing your side matters: moving first is a real advantage in this game (see [the findings](#what-we-learned)), so "Second" is the harder challenge at any level.
+Choosing your side matters: moving first is a real advantage in this game (see [the pilot findings](#what-the-pilot-suggests)), so "Second" is the harder challenge at any level.
 
 <br clear="right">
 
@@ -142,7 +142,7 @@ Once installed, the game is also available as the `cargostorm` command. The trai
 flowchart LR
     subgraph Rules["Same rules, three engines"]
         E["engine.py<br/>reference engine<br/>(readable, used by the game)"]
-        V["vecgame.py<br/>numpy, hundreds of games at once<br/>(~440,000 moves/s, for training)"]
+        V["vecgame.py<br/>numpy, hundreds of games at once<br/>(for training)"]
         B["bitboard.py<br/>each player = one integer<br/>(for game-tree search)"]
     end
     E --> UI["ui/<br/>match controller, animation,<br/>procedural art and sound"]
@@ -152,7 +152,7 @@ flowchart LR
     AG --> ENV
 ```
 
-**One rulebook, three engines.** The game uses a clear, readable reference engine. Training needs speed, so a numpy engine plays hundreds of games at once, about **37× faster**. Search needs even more speed per position, so a bitboard engine stores each player's crates as a single integer, where four-in-a-row detection is four shift-and-AND operations. During development all three were checked against each other, move by move, over thousands of games.
+**One rulebook, three engines.** The game uses a clear, readable reference engine. Training needs speed, so a numpy engine plays hundreds of games at once. Search needs even more speed per position, so a bitboard engine stores each player's crates as a single integer, where four-in-a-row detection is four shift-and-AND operations. During development all three were checked against each other, move by move, over thousands of games.
 
 **The canonical-frame trick.** Every engine rotates the board so that gravity always points **down** before doing anything. Dropping and cascading are then always the classic "fall to the bottom" case, written once. The AI sees the board the same way, so it never needs to be told which way gravity points, and never has to learn the same pattern separately for each of the four orientations.
 
@@ -180,7 +180,7 @@ There's no reward shaping. A "three in a row" that looks strong under one gravit
 |---|---|
 | **Random** | Any legal move |
 | **Heuristic** | Win if possible, block a drop-win, otherwise pick the position with the most open threes and twos. **Ignores storms.** |
-| **Expectiminimax-N** | Searches N moves ahead and **averages over the four storm outcomes** (calm ½, each new gravity ⅙) using chance nodes, with Star1 pruning. Depth 3 takes about 86 ms per move |
+| **Expectiminimax-N** | Searches N moves ahead and **averages over the four storm outcomes** (calm ½, each new gravity ⅙) using chance nodes, with Star1 pruning, and a hand-written evaluation at the leaves |
 
 ### The three learners
 
@@ -216,9 +216,12 @@ Training ran on an **Apple M1 MacBook Air (8 GB)** using the Metal GPU backend. 
 
 ---
 
-## 🏆 Results: the tournament
+## 🏆 Pilot results
 
-After training, every agent played every other in a **round-robin of 28 pairings × 1,000 games**: **28,000 games**, with seats alternating so the first-move advantage cancels out. The results were fitted to an **Elo scale** (Random = 0) with 95% intervals from 200 bootstrap resamples.
+> [!WARNING]
+> **These are pilot results, not final ones.** Each algorithm was trained once (a single seed); DQN and SAC were interrupted and warm-started mid-run; PPO received one extra round of tuning; and each agent's checkpoint was picked from noisy 200-game evaluations, which flatters it. Treat every number below as indicative only. A controlled study (multiple seeds, uninterrupted runs, equal tuning, pre-registered protocol) is in progress.
+
+After training, every agent played every other in a **round-robin of 28 pairings × 1,000 games**: **28,000 games**, with seats alternating so the first-move advantage cancels out. The results were fitted to an **Elo-style rating** (a Bradley–Terry fit within this pool of players, anchored at Random = 0, so not comparable to chess Elo) with 95% intervals from 200 bootstrap resamples.
 
 > [!IMPORTANT]
 > **DQN and SAC tie for best learner** and both clearly beat the hand-written Heuristic bot and depth-1 search. **Neither has caught up with depth-2 or depth-3 search yet.** **PPO finished last of the learners** after its policy hardened too early.
@@ -265,7 +268,7 @@ Score against each fixed opponent during training (greedy play, 200 games per po
 <img src="docs/images/learning_curves.png" alt="Learning curves" width="100%">
 </div>
 
-### What we learned
+### What the pilot suggests
 
 <table>
 <tr valign="top">
@@ -368,4 +371,4 @@ cargo-storm/
 - This README was written with help from **[Claude](https://claude.ai)** (Anthropic).
 - The game began as a Connect 4 assignment; Cargo Storm is its re-imagined, storm-tossed successor.
 
-© Ojas Kulkarni. All rights reserved.
+Released under the [MIT License](LICENSE).

@@ -4,6 +4,7 @@ version = "1.0.0"
 description = "Connect 4 in a ship's hold where gravity shifts, plus DQN, PPO and SAC agents that learn to play it."
 readme = "README.md"
 requires-python = ">=3.11"
+license = { text = "MIT" }
 dependencies = ["numpy>=2.0", "pygame-ce>=2.5", "torch>=2.2"]
 
 [project.scripts]
